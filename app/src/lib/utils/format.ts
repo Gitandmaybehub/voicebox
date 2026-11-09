@@ -56,6 +56,7 @@ export function formatAbsoluteDate(date: string | Date): string {
 }
 
 const ENGINE_DISPLAY_NAMES: Record<string, string> = {
+  openrouter: 'OpenRouter',
   qwen: 'Qwen',
   qwen_custom_voice: 'Qwen CustomVoice',
   qwen_voice_design: 'Qwen VoiceDesign',
@@ -67,6 +68,14 @@ const ENGINE_DISPLAY_NAMES: Record<string, string> = {
 };
 
 export function formatEngineName(engine?: string, modelSize?: string): string {
+  if (engine === 'openrouter') {
+    const names: Record<string, string> = {
+      'heygen/heygen-voice-1': 'HeyGen Voice',
+      'heygen/heygen-voice-1-turbo': 'HeyGen Voice Turbo',
+      'fish-audio/drama-3': 'Fish Audio Drama 3',
+    };
+    return `OpenRouter · ${names[modelSize ?? ''] ?? modelSize ?? 'Cloud voice'}`;
+  }
   const name = ENGINE_DISPLAY_NAMES[engine ?? 'qwen'] ?? engine ?? 'Qwen';
   if (engine === 'qwen' && modelSize) {
     return `${name} ${modelSize}`;

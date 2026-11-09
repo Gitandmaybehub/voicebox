@@ -1,3 +1,4 @@
+import { OpenRouterPage } from '@/components/ServerTab/OpenRouterPage';
 import {
   createRootRoute,
   createRoute,
@@ -148,6 +149,12 @@ const settingsGeneralRoute = createRoute({
   component: GeneralPage,
 });
 
+const settingsOpenRouterRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/openrouter',
+  component: OpenRouterPage,
+});
+
 const settingsGenerationRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: '/generation',
@@ -210,6 +217,7 @@ const routeTree = rootRoute.addChildren([
   settingsRoute.addChildren([
     settingsGeneralRoute,
     settingsGenerationRoute,
+    settingsOpenRouterRoute,
     settingsCapturesRoute,
     settingsMCPRoute,
     settingsGpuRoute,

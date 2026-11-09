@@ -27,6 +27,12 @@ def register_routers(app: FastAPI) -> None:
     from .cloud import router as cloud_router
     from .openai_compat import router as openai_compat_router
 
+    from .openrouter import router as openrouter_router, handle_openrouter_error
+    from ..services.openrouter import OpenRouterError
+
+    app.add_exception_handler(OpenRouterError, handle_openrouter_error)
+
+    app.include_router(openrouter_router)
     app.include_router(health_router)
     app.include_router(profiles_router)
     app.include_router(channels_router)

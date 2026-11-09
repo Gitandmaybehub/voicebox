@@ -29,7 +29,7 @@ interface AudioSampleRecordingProps {
   onStart: () => void;
   onStop: () => void;
   onCancel: () => void;
-  onTranscribe: () => void;
+  onTranscribe?: () => void;
   onPlayPause: () => void;
   isPlaying: boolean;
   isTranscribing?: boolean;
@@ -144,7 +144,7 @@ export function AudioSampleRecording({
                 >
                   {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                 </Button>
-                <Button
+                {onTranscribe && (<Button
                   type="button"
                   variant="outline"
                   onClick={onTranscribe}
@@ -153,7 +153,7 @@ export function AudioSampleRecording({
                 >
                   <Mic className="h-4 w-4" />
                   {isTranscribing ? t('audioSample.transcribing') : t('audioSample.transcribe')}
-                </Button>
+                </Button>)}
                 <Button
                   type="button"
                   variant="outline"

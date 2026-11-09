@@ -230,6 +230,7 @@ _OPENAI_COMPAT_CACHE_KEY = "openai_compat"
 # Supported TTS engines — keyed by engine name, value is the backend class import path.
 # The factory function uses this for the if/elif chain; the model configs live on the backend classes.
 TTS_ENGINES = {
+    "openrouter": "OpenRouter",
     "qwen": "Qwen TTS",
     "qwen_custom_voice": "Qwen CustomVoice",
     "qwen_voice_design": "Qwen VoiceDesign",
@@ -635,7 +636,7 @@ async def load_engine_model(engine: str, model_size: str = "default") -> None:
     backend = get_tts_backend_for_engine(engine)
     if engine in ("qwen", "qwen_custom_voice"):
         await backend.load_model_async(model_size)
-    elif engine == "tada":
+    elif engine in ("tada", "openrouter"):
         await backend.load_model(model_size)
     else:
         await backend.load_model()
@@ -645,6 +646,8 @@ async def ensure_model_cached_or_raise(engine: str, model_size: str = "default")
     """Check if a model is cached, raise HTTPException if not. Used by streaming endpoint."""
     from fastapi import HTTPException
 
+    if engine == "openrouter":
+        return  # Remote service; never check/download local weights.
     backend = get_tts_backend_for_engine(engine)
     cfg = None
     for c in get_tts_model_configs():
@@ -801,7 +804,11 @@ def get_tts_backend_for_engine(engine: str) -> TTSBackend:
         if engine in _tts_backends:
             return _tts_backends[engine]
 
-        if engine == "qwen":
+        if engine == "openrouter":
+            from .openrouter_backend import OpenRouterBackend
+
+            backend = OpenRouterBackend()
+        elif engine == "qwen":
             backend_type = get_backend_type()
             if backend_type == "mlx":
                 from .mlx_backend import MLXTTSBackend

@@ -1,5 +1,7 @@
+import { DEFAULT_OPENROUTER_MODEL, openRouterApi } from '@/lib/api/openrouter';
+import { useOpenRouter } from '@/lib/hooks/useOpenRouter';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
 import { useToast } from '@/components/ui/use-toast';
@@ -21,6 +23,7 @@ const generationSchema = z.object({
   instruct: z.string().max(500).optional(),
   engine: z
     .enum([
+      'openrouter',
       'qwen',
       'qwen_custom_voice',
       'qwen_voice_design',
@@ -33,6 +36,7 @@ const generationSchema = z.object({
     ])
     .optional(),
   personality: z.boolean().optional(),
+  openrouterModel: z.string().optional(),
 });
 
 export type GenerationFormValues = z.infer<typeof generationSchema>;
@@ -46,6 +50,7 @@ interface UseGenerationFormOptions {
 export function useGenerationForm(options: UseGenerationFormOptions = {}) {
   const { toast } = useToast();
   const generation = useGeneration();
+  const cloud = useOpenRouter();
   const addPendingGeneration = useGenerationStore((state) => state.addPendingGeneration);
   const { settings: genSettings } = useGenerationSettings();
   const maxChunkChars = genSettings?.max_chunk_chars ?? 800;
@@ -69,11 +74,17 @@ export function useGenerationForm(options: UseGenerationFormOptions = {}) {
       seed: undefined,
       modelSize: '1.7B',
       instruct: '',
-      engine: (selectedEngine as GenerationFormValues['engine']) || 'qwen',
+      engine: (selectedEngine as GenerationFormValues['engine']) || 'openrouter',
       personality: false,
       ...options.defaultValues,
     },
   });
+
+  useEffect(() => {
+    if (!form.getFieldState('openrouterModel').isDirty && cloud.settings.data) {
+      form.setValue('openrouterModel', cloud.settings.data.model || DEFAULT_OPENROUTER_MODEL);
+    }
+  }, [cloud.settings.data, form]);
 
   async function handleSubmit(
     data: GenerationFormValues,
@@ -89,7 +100,29 @@ export function useGenerationForm(options: UseGenerationFormOptions = {}) {
     }
 
     try {
-      const engine = data.engine || 'qwen';
+      const engine = data.engine || 'openrouter';
+      let cloudModel: string | undefined;
+      if (engine === 'openrouter') {
+        const [settings, catalog, profile] = await Promise.all([
+          openRouterApi.settings(),
+          openRouterApi.models(),
+          apiClient.getProfile(selectedProfileId),
+        ]);
+        if (!settings.configured)
+          throw new Error('Add your OpenRouter key in Settings → OpenRouter.');
+        if ((profile.voice_type || 'cloned') !== 'cloned' || profile.sample_count < 1) {
+          throw new Error(
+            'OpenRouter needs a cloned voice profile with an uploaded or recorded sample. Preset and designed voices are not supported.',
+          );
+        }
+        cloudModel = data.openrouterModel || settings.model || DEFAULT_OPENROUTER_MODEL;
+        const model = catalog.models.find((m) => m.id === cloudModel);
+        if (!model?.available || !model.supports_voice_cloning) {
+          throw new Error(
+            'This OpenRouter model is unavailable or voice cloning is unverified. Choose an available clone model.',
+          );
+        }
+      }
       const modelName =
         engine === 'luxtts'
           ? 'luxtts'
@@ -135,17 +168,28 @@ export function useGenerationForm(options: UseGenerationFormOptions = {}) {
                           ? 'Qwen TTS 1.7B'
                           : 'Qwen TTS 0.6B';
 
-      // Check if model needs downloading
-      try {
-        const modelStatus = await apiClient.getModelStatus();
-        const model = modelStatus.models.find((m) => m.model_name === modelName);
-
-        if (model && !model.downloaded) {
-          setDownloadingModelName(modelName);
-          setDownloadingDisplayName(displayName);
+      // Cloud engines never trigger local model discovery or downloads.
+      if (engine !== 'openrouter') {
+        const profile = await apiClient.getProfile(selectedProfileId);
+        if ((profile.voice_type || 'cloned') === 'cloned') {
+          const samples = await apiClient.listProfileSamples(selectedProfileId);
+          if (!samples.length || samples.some((sample) => !sample.reference_text?.trim())) {
+            throw new Error(
+              'This local engine needs an exact transcript for each voice sample. Add the spoken words to the profile samples or use OpenRouter.',
+            );
+          }
         }
-      } catch (error) {
-        console.error('Failed to check model status:', error);
+        try {
+          const modelStatus = await apiClient.getModelStatus();
+          const model = modelStatus.models.find((m) => m.model_name === modelName);
+
+          if (model && !model.downloaded) {
+            setDownloadingModelName(modelName);
+            setDownloadingDisplayName(displayName);
+          }
+        } catch (error) {
+          console.error('Failed to check model status:', error);
+        }
       }
 
       const hasModelSizes =
@@ -160,6 +204,7 @@ export function useGenerationForm(options: UseGenerationFormOptions = {}) {
         seed: data.seed,
         model_size: hasModelSizes ? data.modelSize : undefined,
         engine,
+        openrouter_model: cloudModel,
         instruct: supportsInstruct ? data.instruct || undefined : undefined,
         personality: data.personality || undefined,
         max_chunk_chars: maxChunkChars,
@@ -179,6 +224,7 @@ export function useGenerationForm(options: UseGenerationFormOptions = {}) {
         modelSize: data.modelSize,
         instruct: '',
         engine: data.engine,
+        openrouterModel: cloudModel ?? data.openrouterModel,
         personality: data.personality,
       });
       options.onSuccess?.(result.id);
@@ -194,7 +240,19 @@ export function useGenerationForm(options: UseGenerationFormOptions = {}) {
     }
   }
 
+  const selectedCloudModel =
+    form.watch('openrouterModel') || cloud.settings.data?.model || DEFAULT_OPENROUTER_MODEL;
+  const cloudModel = cloud.models.data?.models.find((model) => model.id === selectedCloudModel);
+  const cloudUnavailable =
+    form.watch('engine') === 'openrouter' &&
+    (!cloud.settings.data?.configured ||
+      cloud.settings.isError ||
+      cloud.models.isError ||
+      !cloudModel?.available ||
+      !cloudModel.supports_voice_cloning);
+
   return {
+    cloudUnavailable,
     form,
     handleSubmit,
     isPending: generation.isPending,

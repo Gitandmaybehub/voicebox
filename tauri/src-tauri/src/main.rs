@@ -976,7 +976,7 @@ fn stop_audio_playback(
 /// `FocusSnapshot::bundle_id` on the current platform — reverse-DNS bundle
 /// id on macOS, lowercased exe basename on Windows/Linux.
 #[cfg(target_os = "macos")]
-const VOICEBOX_BUNDLE_ID: &str = "sh.voicebox.app";
+const VOICEBOX_BUNDLE_ID: &str = "com.gng.voicebox";
 #[cfg(target_os = "windows")]
 const VOICEBOX_BUNDLE_ID: &str = "voicebox.exe";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]

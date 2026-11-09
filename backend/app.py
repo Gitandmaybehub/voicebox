@@ -186,6 +186,10 @@ def _configure_cors(application: FastAPI) -> None:
         allow_headers=["*"],
     )
 
+    from .utils.origin import BrowserWriteOriginMiddleware
+
+    application.add_middleware(BrowserWriteOriginMiddleware, allowed_origins=all_origins)
+
 
 def _mount_frontend(application: FastAPI) -> None:
     """Serve the built web frontend when present (Docker / web deployment).

@@ -10,6 +10,7 @@ interface SettingsTab {
   label?: string;
   path:
     | '/settings'
+    | '/settings/openrouter'
     | '/settings/generation'
     | '/settings/captures'
     | '/settings/mcp'
@@ -21,6 +22,7 @@ interface SettingsTab {
 }
 
 const tabs: SettingsTab[] = [
+  { label: 'OpenRouter', path: '/settings/openrouter' },
   { labelKey: 'settings.tabs.general', path: '/settings' },
   { labelKey: 'settings.tabs.generation', path: '/settings/generation' },
   { labelKey: 'settings.tabs.captures', path: '/settings/captures' },

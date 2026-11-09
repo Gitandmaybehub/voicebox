@@ -80,14 +80,8 @@ export function useAddSample() {
       file: File;
       referenceText: string;
     }) => apiClient.addProfileSample(profileId, file, referenceText),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: ['profiles', variables.profileId, 'samples'],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ['profiles', variables.profileId],
-      });
-    },
+    // Refresh the list, selected profile, and sample queries before upload completes.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profiles'] }),
   });
 }
 

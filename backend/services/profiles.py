@@ -32,7 +32,7 @@ from . import history
 
 logger = logging.getLogger(__name__)
 
-CLONING_ENGINES = {"qwen", "luxtts", "chatterbox", "chatterbox_turbo", "tada", "omnivoice"}
+CLONING_ENGINES = {"openrouter", "qwen", "luxtts", "chatterbox", "chatterbox_turbo", "tada", "omnivoice"}
 
 # Engines that synthesise a voice from a natural-language description
 # (voice_type "designed") rather than from samples or a preset id.
@@ -254,6 +254,9 @@ async def add_profile_sample(
     if not profile:
         raise ValueError(f"Profile {profile_id} not found")
 
+    if not reference_text.strip() and default_engine_for_profile(profile) != "openrouter":
+        raise ValueError("A reference transcript is required for local voice engines.")
+
     # Validate and load audio in a single pass, off the event loop
     is_valid, error_msg, audio, sr = await asyncio.to_thread(
         validate_and_load_reference_audio, audio_path
@@ -307,7 +310,11 @@ async def get_profile(
     if not profile:
         return None
 
-    return _profile_to_response(profile)
+    return _profile_to_response(
+        profile,
+        generation_count=db.query(DBGeneration).filter_by(profile_id=profile_id).count(),
+        sample_count=db.query(DBProfileSample).filter_by(profile_id=profile_id).count(),
+    )
 
 
 def get_profile_orm_by_name_or_id(
@@ -631,7 +638,14 @@ async def create_voice_prompt_for_profile(
     if not samples:
         raise ValueError(f"No samples found for profile {profile_id}")
 
+    if engine != "openrouter" and any(not s.reference_text.strip() for s in samples):
+        raise ValueError("Add reference transcripts before using this profile with a local voice engine.")
+
     tts_model = get_tts_backend_for_engine(engine)
+
+    if engine == "openrouter":
+        # One deterministic reference, independent of database row order.
+        samples = sorted(samples, key=lambda sample: sample.id)[:1]
 
     if len(samples) == 1:
         sample = samples[0]

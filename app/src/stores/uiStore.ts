@@ -84,7 +84,7 @@ export const useUIStore = create<UIStore>()(
       selectedProfileId: null,
       setSelectedProfileId: (id) => set({ selectedProfileId: id }),
 
-      selectedEngine: 'qwen',
+      selectedEngine: 'openrouter',
       setSelectedEngine: (engine) => set({ selectedEngine: engine }),
 
       selectedVoiceId: null,
@@ -103,6 +103,7 @@ export const useUIStore = create<UIStore>()(
       name: 'voicebox-ui',
       partialize: (state) => ({
         selectedProfileId: state.selectedProfileId,
+        selectedEngine: state.selectedEngine,
         theme: state.theme,
       }),
       onRehydrateStorage: () => (state) => {

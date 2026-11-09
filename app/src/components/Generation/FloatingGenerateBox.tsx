@@ -1,3 +1,5 @@
+import { OpenRouterControls } from './OpenRouterControls';
+import { isProfileCompatibleWithEngine } from './EngineModelSelector';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useMatchRoute } from '@tanstack/react-router';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -79,7 +81,7 @@ export function FloatingGenerateBox({
   // Calculate if track editor is visible (on stories route with items)
   const hasTrackEditor = isStoriesRoute && currentStory && currentStory.items.length > 0;
 
-  const { form, handleSubmit, isPending } = useGenerationForm({
+  const { form, handleSubmit, isPending, cloudUnavailable } = useGenerationForm({
     onSuccess: async (generationId) => {
       setIsExpanded(false);
       // Defer the story add until TTS completes -- useGenerationProgress handles it
@@ -129,12 +131,15 @@ export function FloatingGenerateBox({
     };
   }, [isExpanded]);
 
-  // Set first voice as default if none selected
+  // Keep an existing selection, but recover from a deleted or stale profile ID.
   useEffect(() => {
-    if (!selectedProfileId && profiles && profiles.length > 0) {
-      setSelectedProfileId(profiles[0].id);
-    }
-  }, [selectedProfileId, profiles, setSelectedProfileId]);
+    if (!profiles || profiles.some((profile) => profile.id === selectedProfileId)) return;
+    const preferred = profiles.find((profile) =>
+      isProfileCompatibleWithEngine(profile, form.getValues('engine') || 'openrouter'),
+    );
+    const nextProfileId = preferred?.id ?? null;
+    if (nextProfileId !== selectedProfileId) setSelectedProfileId(nextProfileId);
+  }, [selectedProfileId, profiles, setSelectedProfileId, form]);
 
   // Sync engine selection to global store so ProfileList can filter
   const watchedEngine = form.watch('engine');
@@ -146,6 +151,7 @@ export function FloatingGenerateBox({
 
   // Sync generation form language, engine, and effects with selected profile
   type EngineValue =
+    | 'openrouter'
     | 'qwen'
     | 'luxtts'
     | 'chatterbox'
@@ -486,7 +492,7 @@ export function FloatingGenerateBox({
                 <div className="group relative">
                   <Button
                     type="submit"
-                    disabled={isPending || !selectedProfileId}
+                    disabled={isPending || cloudUnavailable || !selectedProfileId || (watchedEngine === 'openrouter' && (!selectedProfile || !isProfileCompatibleWithEngine(selectedProfile, 'openrouter') || selectedProfile.sample_count < 1))}
                     className="h-10 w-10 rounded-full bg-accent hover:bg-accent/90 hover:scale-105 text-accent-foreground shadow-lg hover:shadow-accent/50 transition-all duration-200"
                     size="icon"
                     aria-label={
@@ -513,6 +519,8 @@ export function FloatingGenerateBox({
                 </div>
               </div>
             </div>
+
+            {watchedEngine === 'openrouter' && <OpenRouterControls form={form} profile={selectedProfile} />}
 
             {/* Additive instruct textarea — shown below main text when toggle is on and engine supports it */}
             <AnimatePresence>
@@ -580,7 +588,7 @@ export function FloatingGenerateBox({
                   )}
 
 
-                  <FormField
+                  {watchedEngine !== 'openrouter' && <FormField
                     control={form.control}
                     name="language"
                     render={({ field }) => {
@@ -607,7 +615,7 @@ export function FloatingGenerateBox({
                         </FormItem>
                       );
                     }}
-                  />
+                  />}
 
                   <FormItem className="flex-1 space-y-0">
                     <EngineModelSelector form={form} compact />

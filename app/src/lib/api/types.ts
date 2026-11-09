@@ -71,6 +71,7 @@ export interface GenerationRequest {
   language: LanguageCode;
   seed?: number;
   model_size?: '1.7B' | '0.6B' | '1B' | '3B';
+  openrouter_model?: string;
   engine?:
     | 'qwen'
     | 'qwen_custom_voice'
@@ -80,7 +81,8 @@ export interface GenerationRequest {
     | 'chatterbox_turbo'
     | 'tada'
     | 'kokoro'
-    | 'omnivoice';
+    | 'omnivoice'
+    | 'openrouter';
   instruct?: string;
   /** When true and the profile has a personality prompt, input text is rewritten in-character before TTS. */
   personality?: boolean;

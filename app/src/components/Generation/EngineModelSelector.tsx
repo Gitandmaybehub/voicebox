@@ -17,6 +17,7 @@ import type { GenerationFormValues } from '@/lib/hooks/useGenerationForm';
  * Adding a new engine means adding one entry here.
  */
 const ENGINE_OPTIONS = [
+  { value: 'openrouter', label: 'OpenRouter (cloud clone)', engine: 'openrouter' },
   { value: 'qwen:1.7B', label: 'Qwen3-TTS 1.7B', engine: 'qwen' },
   { value: 'qwen:0.6B', label: 'Qwen3-TTS 0.6B', engine: 'qwen' },
   { value: 'qwen_custom_voice:1.7B', label: 'Qwen CustomVoice 1.7B', engine: 'qwen_custom_voice' },
@@ -32,6 +33,7 @@ const ENGINE_OPTIONS = [
 ] as const;
 
 const ENGINE_DESCRIPTIONS: Record<string, string> = {
+  openrouter: 'Cloud voice cloning with your saved sample; no local model download',
   qwen: 'Multi-language, two sizes',
   qwen_custom_voice: '9 preset voices, instruct control',
   qwen_voice_design: 'Voices described in plain language',
@@ -48,6 +50,7 @@ const ENGLISH_ONLY_ENGINES = new Set(['luxtts', 'chatterbox_turbo']);
 
 /** Engines that support cloned (reference audio) profiles. */
 const CLONING_ENGINES = new Set([
+  'openrouter',
   'qwen',
   'luxtts',
   'chatterbox',
@@ -72,6 +75,11 @@ function getSelectValue(engine: string, modelSize?: string): string {
 }
 
 export function applyEngineSelection(form: UseFormReturn<GenerationFormValues>, value: string) {
+  if (value === 'openrouter') {
+    form.setValue('engine', 'openrouter');
+    form.setValue('modelSize', undefined);
+    return;
+  }
   if (value.startsWith('qwen_custom_voice:')) {
     const [, modelSize] = value.split(':');
     form.setValue('engine', 'qwen_custom_voice');
@@ -136,10 +144,10 @@ export function EngineModelSelector({ form, compact, selectedProfile }: EngineMo
   const currentEngineAvailable = availableOptions.some((opt) => opt.value === selectValue);
 
   useEffect(() => {
-    if (!currentEngineAvailable && availableOptions.length > 0) {
+    if (engine !== 'openrouter' && !currentEngineAvailable && availableOptions.length > 0) {
       applyEngineSelection(form, availableOptions[0].value);
     }
-  }, [availableOptions, currentEngineAvailable, form]);
+  }, [availableOptions, currentEngineAvailable, form, engine]);
 
   const itemClass = compact ? 'text-xs text-muted-foreground' : undefined;
   const triggerClass = compact

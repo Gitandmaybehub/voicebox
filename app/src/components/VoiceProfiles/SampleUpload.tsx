@@ -36,7 +36,6 @@ const sampleSchema = z.object({
   file: z.instanceof(File, { message: 'Please select an audio file' }),
   referenceText: z
     .string()
-    .min(1, 'Reference text is required')
     .max(1000, 'Reference text must be less than 1000 characters'),
 });
 
@@ -53,6 +52,7 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
   const addSample = useAddSample();
   const transcribe = useTranscription();
   const { data: profile } = useProfile(profileId);
+  const transcriptOptional = profile?.default_engine === 'openrouter';
   const { toast } = useToast();
   const [mode, setMode] = useState<'upload' | 'record' | 'system'>('upload');
   const { isPlaying, playPause, cleanup: cleanupAudio } = useAudioPlayer();
@@ -142,6 +142,7 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
   }, [systemRecordingError, toast]);
 
   async function handleTranscribe() {
+    if (transcriptOptional) return;
     const file = form.getValues('file');
     if (!file) {
       toast({
@@ -167,6 +168,10 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
   }
 
   async function onSubmit(data: SampleFormValues) {
+    if (!transcriptOptional && !data.referenceText.trim()) {
+      form.setError('referenceText', { message: 'Reference text is required for local engines.' });
+      return;
+    }
     try {
       await addSample.mutateAsync({
         profileId,
@@ -259,7 +264,7 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
                     <AudioSampleUpload
                       file={selectedFile}
                       onFileChange={onChange}
-                      onTranscribe={handleTranscribe}
+                      onTranscribe={transcriptOptional ? undefined : handleTranscribe}
                       onPlayPause={handlePlayPause}
                       isPlaying={isPlaying}
                       isTranscribing={transcribe.isPending}
@@ -281,7 +286,7 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
                       onStart={startRecording}
                       onStop={stopRecording}
                       onCancel={handleCancelRecording}
-                      onTranscribe={handleTranscribe}
+                      onTranscribe={transcriptOptional ? undefined : handleTranscribe}
                       onPlayPause={handlePlayPause}
                       isPlaying={isPlaying}
                       isTranscribing={transcribe.isPending}
@@ -303,7 +308,7 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
                         onStart={startSystemRecording}
                         onStop={stopSystemRecording}
                         onCancel={handleCancelRecording}
-                        onTranscribe={handleTranscribe}
+                        onTranscribe={transcriptOptional ? undefined : handleTranscribe}
                         onPlayPause={handlePlayPause}
                         isPlaying={isPlaying}
                         isTranscribing={transcribe.isPending}
@@ -319,7 +324,8 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
               name="referenceText"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Reference Text</FormLabel>
+                  <FormLabel>{transcriptOptional ? 'Reference text (optional for OpenRouter)' : 'Reference Text'}</FormLabel>
+                  {transcriptOptional && <p className="text-xs text-muted-foreground">Exact spoken words, or leave blank.</p>}
                   <FormControl>
                     <Textarea
                       placeholder="Enter the exact text spoken in the audio..."

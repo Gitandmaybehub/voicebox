@@ -154,7 +154,7 @@ SAMPLE_UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1 MB
 async def add_profile_sample(
     profile_id: str,
     file: UploadFile = File(...),
-    reference_text: str = Form(...),
+    reference_text: str = Form(""),
     db: Session = Depends(get_db),
 ):
     """Add a sample to a voice profile."""

@@ -7,7 +7,7 @@ import { FormControl, FormItem, FormMessage } from '@/components/ui/form';
 interface AudioSampleUploadProps {
   file: File | null | undefined;
   onFileChange: (file: File | undefined) => void;
-  onTranscribe: () => void;
+  onTranscribe?: () => void;
   onPlayPause: () => void;
   isPlaying: boolean;
   isValidating?: boolean;
@@ -118,7 +118,7 @@ export function AudioSampleUpload({
                   >
                     {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                   </Button>
-                  <Button
+                  {onTranscribe && (<Button
                     type="button"
                     variant="outline"
                     onClick={onTranscribe}
@@ -127,7 +127,7 @@ export function AudioSampleUpload({
                   >
                     <Mic className="h-4 w-4" />
                     {isTranscribing ? t('audioSample.transcribing') : t('audioSample.transcribe')}
-                  </Button>
+                  </Button>)}
                   <Button
                     type="button"
                     variant="outline"

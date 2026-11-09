@@ -67,6 +67,7 @@ const PRESET_ONLY_ENGINES = new Set(['kokoro', 'qwen_custom_voice', 'qwen_voice_
 /** The engine a designed profile is created against. */
 const DESIGN_ENGINE = 'qwen_voice_design';
 const DEFAULT_ENGINE_OPTIONS = [
+  { value: 'openrouter', label: 'OpenRouter (cloud clone)' },
   { value: 'qwen', label: 'Qwen3-TTS' },
   { value: 'qwen_custom_voice', label: 'Qwen CustomVoice' },
   { value: 'qwen_voice_design', label: 'Qwen VoiceDesign' },
@@ -78,7 +79,7 @@ const DEFAULT_ENGINE_OPTIONS = [
   { value: 'omnivoice', label: 'OmniVoice (non-commercial)' },
 ] as const;
 
-function makeProfileSchema(t: (key: string) => string) {
+function makeProfileSchema(t: (key: string) => string, transcriptOptional: boolean) {
   const baseProfileSchema = z.object({
     name: z.string().min(1, t('profileForm.validation.nameRequired')).max(100),
     description: z.string().max(500).optional(),
@@ -91,7 +92,7 @@ function makeProfileSchema(t: (key: string) => string) {
 
   return baseProfileSchema.refine(
     (data) => {
-      if (data.sampleFile && (!data.referenceText || data.referenceText.trim().length === 0)) {
+      if (!transcriptOptional && data.sampleFile && (!data.referenceText || data.referenceText.trim().length === 0)) {
         return false;
       }
       return true;
@@ -167,10 +168,19 @@ export function ProfileForm() {
   const serverUrl = useServerStore((state) => state.serverUrl);
   const [profileEffectsChain, setProfileEffectsChain] = useState<EffectConfig[]>([]);
   const [effectsDirty, setEffectsDirty] = useState(false);
-  const [defaultEngine, setDefaultEngine] = useState<string>('');
+  const selectedEngine = useUIStore((state) => state.selectedEngine);
+  const [defaultEngine, setDefaultEngine] = useState<string>(selectedEngine === 'openrouter' ? 'openrouter' : '');
+  const transcriptOptional = defaultEngine === 'openrouter';
+
+  // A new profile must not inherit the last edited profile's local engine.
+  useEffect(() => {
+    if (open && !editingProfileId) {
+      setDefaultEngine(selectedEngine === 'openrouter' ? 'openrouter' : '');
+    }
+  }, [open, editingProfileId, selectedEngine]);
 
   const form = useForm<ProfileFormValues>({
-    resolver: zodResolver(makeProfileSchema(t)),
+    resolver: zodResolver(makeProfileSchema(t, transcriptOptional)),
     defaultValues: {
       name: '',
       description: '',
@@ -413,6 +423,7 @@ export function ProfileForm() {
     }
   }, [presetVoices, selectedPresetVoiceId]);
   async function handleTranscribe() {
+    if (transcriptOptional) return;
     const file = form.getValues('sampleFile');
     if (!file) {
       toast({
@@ -509,7 +520,7 @@ export function ProfileForm() {
             name: data.name,
             description: data.description,
             language: data.language,
-            default_engine: defaultEngine || undefined,
+            default_engine: defaultEngine,
             personality: data.personality?.trim() ? data.personality.trim() : undefined,
           },
         });
@@ -665,7 +676,7 @@ export function ProfileForm() {
           return;
         }
 
-        if (!referenceText || referenceText.trim().length === 0) {
+        if (!transcriptOptional && (!referenceText || referenceText.trim().length === 0)) {
           form.setError('referenceText', {
             type: 'manual',
             message: t('profileForm.validation.referenceTextRequired'),
@@ -738,7 +749,7 @@ export function ProfileForm() {
           await addSample.mutateAsync({
             profileId: profile.id,
             file: fileToUpload,
-            referenceText: referenceText,
+            referenceText: referenceText || '',
           });
 
           // Handle avatar upload if provided
@@ -1083,7 +1094,7 @@ export function ProfileForm() {
                                   <AudioSampleUpload
                                     file={selectedFile}
                                     onFileChange={onChange}
-                                    onTranscribe={handleTranscribe}
+                                    onTranscribe={transcriptOptional ? undefined : handleTranscribe}
                                     onPlayPause={handlePlayPause}
                                     isPlaying={isPlaying}
                                     isValidating={isValidatingAudio}
@@ -1110,7 +1121,7 @@ export function ProfileForm() {
                                     onStart={startRecording}
                                     onStop={stopRecording}
                                     onCancel={handleCancelRecording}
-                                    onTranscribe={handleTranscribe}
+                                    onTranscribe={transcriptOptional ? undefined : handleTranscribe}
                                     onPlayPause={handlePlayPause}
                                     isPlaying={isPlaying}
                                     isTranscribing={transcribe.isPending}
@@ -1132,7 +1143,7 @@ export function ProfileForm() {
                                       onStart={startSystemRecording}
                                       onStop={stopSystemRecording}
                                       onCancel={handleCancelRecording}
-                                      onTranscribe={handleTranscribe}
+                                      onTranscribe={transcriptOptional ? undefined : handleTranscribe}
                                       onPlayPause={handlePlayPause}
                                       isPlaying={isPlaying}
                                       isTranscribing={transcribe.isPending}
@@ -1148,7 +1159,8 @@ export function ProfileForm() {
                             name="referenceText"
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>{t('profileForm.fields.referenceText')}</FormLabel>
+                                <FormLabel>{transcriptOptional ? 'Reference text (optional for OpenRouter)' : t('profileForm.fields.referenceText')}</FormLabel>
+                                {transcriptOptional && <p className="text-xs text-muted-foreground">Exact spoken words, or leave blank.</p>}
                                 <FormControl>
                                   <Textarea
                                     placeholder={t('profileForm.fields.referenceTextPlaceholder')}

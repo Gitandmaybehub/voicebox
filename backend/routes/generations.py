@@ -75,6 +75,12 @@ async def generate_speech(
         raise HTTPException(status_code=400, detail=str(e))
 
     model_size = (data.model_size or "1.7B") if engine_has_model_sizes(engine) else None
+    if engine == "openrouter":
+        from ..services.openrouter import resolve_model, OpenRouterError
+        try:
+            model_size = resolve_model(data.openrouter_model)
+        except OpenRouterError as exc:
+            raise HTTPException(400, str(exc)) from None
 
     text = data.text
     source = "manual"
@@ -100,7 +106,7 @@ async def generate_speech(
         generation_id=generation_id,
         status="generating",
         engine=engine,
-        model_size=model_size if engine_has_model_sizes(engine) else None,
+        model_size=model_size,
         source=source,
     )
 
@@ -340,6 +346,12 @@ async def stream_speech(
         raise HTTPException(status_code=400, detail=str(e))
     tts_model = get_tts_backend_for_engine(engine)
     model_size = data.model_size or "1.7B"
+    if engine == "openrouter":
+        from ..services.openrouter import resolve_model, OpenRouterError
+        try:
+            model_size = resolve_model(data.openrouter_model)
+        except OpenRouterError as exc:
+            raise HTTPException(400, str(exc)) from None
 
     await ensure_model_cached_or_raise(engine, model_size)
     await load_engine_model(engine, model_size)
