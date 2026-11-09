@@ -5,23 +5,37 @@ import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { formatOpenRouterModelName, DEFAULT_OPENROUTER_MODEL, openRouterApi } from '@/lib/api/openrouter';
+import {
+  DEFAULT_OPENROUTER_MODEL,
+  findOpenRouterModel,
+  formatOpenRouterOption,
+  formatOpenRouterUpdated,
+  openRouterApi,
+} from '@/lib/api/openrouter';
 import { useOpenRouter } from '@/lib/hooks/useOpenRouter';
+import { useServerStore } from '@/stores/serverStore';
 import { SettingRow, SettingSection } from './SettingRow';
 
 export function OpenRouterPage() {
-  const { settings, models, verification } = useOpenRouter();
+  const { settings, models, verification, refreshModels, refetchModelsIfStale } = useOpenRouter();
   const queryClient = useQueryClient();
+  const server = useServerStore((state) => state.serverUrl);
   const [key, setKey] = useState('');
   const [model, setModel] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const selected = model ?? settings.data?.model ?? DEFAULT_OPENROUTER_MODEL;
-  const selectedModel = models.data?.models.find((m) => m.id === selected);
+  const selectedModel = findOpenRouterModel(models.data, selected);
+  const currentSelections = [
+    ...new Set([selected, settings.data?.model].filter((id): id is string => !!id)),
+  ].filter((id) => !models.data?.models.some((row) => row.id === id));
+  const catalogError = models.error?.message || models.data?.error;
   const available = selectedModel?.available && selectedModel.supports_voice_cloning;
 
   async function act(action: 'save' | 'check' | 'remove') {
@@ -36,7 +50,7 @@ export function OpenRouterPage() {
             : 'Key check did not confirm access. Check the key and try again.',
         );
       } else {
-        await openRouterApi.save(
+        const saved = await openRouterApi.save(
           action === 'remove'
             ? { clear_key: true }
             : { ...(key.trim() ? { api_key: key.trim() } : {}), model: selected },
@@ -45,6 +59,7 @@ export function OpenRouterPage() {
           queryKey: ['openrouter'],
           predicate: (q) => q.queryKey[2] === 'verification',
         });
+        queryClient.setQueryData(['openrouter', server, 'settings'], saved);
         setKey('');
         setModel(null);
         setMessage(action === 'remove' ? 'Key removed.' : 'Saved.');
@@ -88,29 +103,80 @@ export function OpenRouterPage() {
           </p>
         </SettingRow>
         <SettingRow title="Voice model">
-          <Select value={selected} onValueChange={setModel} disabled={busy}>
+          <Select
+            value={selected}
+            onValueChange={setModel}
+            onOpenChange={refetchModelsIfStale}
+            disabled={busy}
+          >
             <SelectTrigger aria-label="OpenRouter default voice model">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {!selectedModel && <SelectItem value={selected}>{selected} (unverified)</SelectItem>}
-              {models.data?.models.map((m) => (
-                <SelectItem
-                  key={m.id}
-                  value={m.id}
-                  disabled={!m.available || !m.supports_voice_cloning}
-                >
-                  {formatOpenRouterModelName(m)}
-                  {m.id === models.data.recommended_model ? ' · Recommended' : ''}
-                  {!m.available
-                    ? ' · Unavailable'
-                    : !m.supports_voice_cloning
-                      ? ' · No cloning'
-                      : ''}
-                </SelectItem>
-              ))}
+              {currentSelections.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>Current selection</SelectLabel>
+                  {currentSelections.map((id) => {
+                    const current = findOpenRouterModel(models.data, id);
+                    return (
+                      <SelectItem
+                        key={id}
+                        value={id}
+                        disabled={!current?.available || !current.supports_voice_cloning}
+                      >
+                        {current
+                          ? formatOpenRouterOption({ ...current, rank: null })
+                          : `${id} (unverified)`}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectGroup>
+              )}
+              <SelectGroup>
+                <SelectLabel>Top 15 this week</SelectLabel>
+                {models.data?.models.map((m) => (
+                  <SelectItem
+                    key={m.id}
+                    value={m.id}
+                    disabled={!m.available || !m.supports_voice_cloning}
+                  >
+                    {formatOpenRouterOption(m)}
+                    {m.id === models.data.recommended_model ? ' · Recommended' : ''}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground mt-2">
+            {formatOpenRouterUpdated(models.data)}
+            {' · '}
+            <a
+              href={models.data?.source_url || 'https://openrouter.ai/rankings/speech?view=week'}
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              OpenRouter
+            </a>
+            {' ('}
+            <a
+              href="https://creativecommons.org/licenses/by/4.0/"
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              CC BY 4.0
+            </a>
+            {')'}
+          </p>
+          {(catalogError || models.data?.stale) && (
+            <output className="block text-xs text-muted-foreground">
+              {models.data?.stale || (models.isError && models.data)
+                ? 'Showing saved rankings. '
+                : ''}
+              {catalogError || 'Rankings could not be updated. Try Refresh.'}
+            </output>
+          )}
           <p className="text-sm text-muted-foreground mt-2">
             {models.isError
               ? 'Could not check models. Refresh to retry.'
@@ -144,18 +210,18 @@ export function OpenRouterPage() {
           </Button>
           <Button
             variant="ghost"
-            disabled={busy}
+            disabled={busy || models.isFetching}
             onClick={() => {
               void settings.refetch();
-              void models.refetch();
+              void refreshModels().catch(() => {
+                /* Query error is displayed above. */
+              });
             }}
           >
-            Refresh
+            {models.isFetching ? 'Refreshing…' : 'Refresh'}
           </Button>
         </div>
-        <p role="status" className="pt-3 text-sm">
-          {busy ? 'Working…' : message}
-        </p>
+        <output className="block pt-3 text-sm">{busy ? 'Working…' : message}</output>
       </SettingSection>
     </div>
   );

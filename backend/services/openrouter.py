@@ -2,6 +2,12 @@
 import asyncio
 import json
 import os
+import re
+import math
+from datetime import datetime, timezone
+from collections import defaultdict
+
+from .. import config
 from pathlib import Path
 import sys
 import tempfile
@@ -11,12 +17,14 @@ import httpx
 
 BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "heygen/heygen-voice-1-turbo:free"
-MODEL_NAMES = {
-    DEFAULT_MODEL: "HeyGen Voice Turbo (Free)",
-    "heygen/heygen-voice-1": "HeyGen Voice (Paid)",
-    "heygen/heygen-voice-1-turbo": "HeyGen Voice Turbo (Paid)",
-    "fish-audio/drama-3": "Fish Audio Drama 3 (Paid)",
-}
+SOURCE_URL = "https://openrouter.ai/rankings/speech?view=week"
+RANKINGS_URL = "https://openrouter.ai/api/frontend/v1/rankings/modality-models?routeSegment=speech&view=week"
+CATALOG_URL = "https://openrouter.ai/api/frontend/v1/models/find?output_modalities=speech"
+REFRESH_INTERVAL = 3600
+CATALOG_ERROR = "Cannot refresh OpenRouter models. Try again later."
+CAPABILITY_ERROR = "Cannot verify OpenRouter model capabilities. Try again later."
+UNKNOWN_ERROR = "Selected model is not in the current speech catalog."
+_refresh_tasks = {}
 _lock = threading.Lock()
 
 
@@ -39,7 +47,13 @@ def _read():
         path = settings_path()
         if not path.exists():
             return {"model": DEFAULT_MODEL}
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
+        if not isinstance(data, dict):
+            raise ValueError()
+        validate_model(data.get("model", DEFAULT_MODEL))
+        if "api_key" in data and not isinstance(data["api_key"], str):
+            raise ValueError()
+        return data
     except Exception:
         raise OpenRouterError("Cannot read private OpenRouter settings. Check file permissions.") from None
 
@@ -50,8 +64,10 @@ def status():
 
 
 def validate_model(model):
-    if model not in MODEL_NAMES:
-        raise OpenRouterError("Select HeyGen Voice, HeyGen Voice Turbo, or Fish Audio Drama 3.")
+    if (not isinstance(model, str) or len(model) > 200
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*/[A-Za-z0-9][A-Za-z0-9._-]*(?::[A-Za-z0-9][A-Za-z0-9_-]*)?", model)
+            or ".." in model):
+        raise OpenRouterError("Enter a valid OpenRouter model ID.")
     return model
 
 
@@ -164,15 +180,18 @@ async def check_key():
 
 async def model_capability(model):
     validate_model(model)
-    data = await _json("/models/" + model + "/endpoints")
+    data = await _public_json(BASE_URL + "/models/" + model + "/endpoints")
     try:
-        endpoints = data["data"]["endpoints"]
-        if not isinstance(endpoints, list):
+        info = data["data"]
+        endpoints = info["endpoints"]
+        if not isinstance(endpoints, list) or not all(isinstance(e, dict) for e in endpoints):
             raise ValueError()
-        active = [e for e in endpoints if e.get("status") == 0]
+        if "speech" not in info.get("architecture", {}).get("output_modalities", []):
+            return False, False
+        active = [e for e in endpoints if type(e.get("status")) is int and e["status"] == 0]
         return bool(active), any(e.get("supports_voice_cloning") is True for e in active)
     except Exception:
-        raise OpenRouterError("Cannot verify OpenRouter model capabilities. Try again later.") from None
+        raise OpenRouterError(CAPABILITY_ERROR) from None
 
 
 async def require_cloning(model):
@@ -181,12 +200,230 @@ async def require_cloning(model):
         raise OpenRouterError("Selected OpenRouter model currently cannot clone voices. Select another model explicitly.")
 
 
-async def list_models():
-    async def row(model, name):
+async def _public_json(url):
+    """Only fixed public catalog URLs and structurally validated endpoint paths."""
+    if url not in (RANKINGS_URL, CATALOG_URL):
+        prefix = BASE_URL + "/models/"
+        if not url.startswith(prefix) or not url.endswith("/endpoints"):
+            raise OpenRouterError(CATALOG_ERROR)
+        validate_model(url[len(prefix):-len("/endpoints")])
+    try:
+        async with asyncio.timeout(25):
+            async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=5),
+                                         follow_redirects=False, trust_env=False) as client:
+                async with client.stream("GET", url) as response:
+                    if response.status_code != 200:
+                        raise ValueError()
+                    body = bytearray()
+                    async for part in response.aiter_bytes():
+                        body.extend(part)
+                        if len(body) > 8 * 1024 * 1024:
+                            raise ValueError()
+                    data = json.loads(body)
+                    if not isinstance(data, dict):
+                        raise ValueError()
+                    return data
+    except Exception:
+        raise OpenRouterError(CATALOG_ERROR) from None
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _cache_path():
+    return config.get_data_dir() / "cache" / "openrouter-catalog.json"
+
+
+def _metadata(catalog):
+    entries = catalog["data"]["models"]
+    if not isinstance(entries, list) or not entries:
+        raise ValueError()
+    by_permaslug, by_id = {}, {}
+    for item in entries:
+        # Endpoint variant identifiers are official, including :free. Never infer
+        # an API ID by stripping a date from the permanent identifier.
+        endpoint = item.get("endpoint") or {}
+        ident = validate_model(endpoint.get("model_variant_slug", item.get("slug")))
+        permanent = validate_model(endpoint.get("model_variant_permaslug", item.get("permaslug")))
+        if ident.rpartition(":")[2] == "free" and not permanent.endswith(":free"):
+            raise ValueError()
+        row = {"id": ident, "name": item["name"], "description": item.get("description", ""),
+               "available": False, "supports_voice_cloning": False,
+               "rank": None, "weekly_requests": None}
+        if not isinstance(row["name"], str) or not isinstance(row["description"], str):
+            raise ValueError()
+        # Only public numeric price fields. Never persist provider routing data.
+        pricing = endpoint.get("pricing_json") or endpoint.get("pricing") or item.get("pricing")
+        if isinstance(pricing, dict):
+            row["pricing"] = {k: v for k, v in pricing.items()
+                              if isinstance(k, str) and len(k) < 100
+                              and isinstance(v, (str, int, float)) and not isinstance(v, bool)
+                              and _is_price(v)}
+        if permanent in by_permaslug and by_permaslug[permanent]["id"] != ident:
+            raise ValueError()
+        by_permaslug[permanent] = row
+        by_id[ident] = row
+    return by_permaslug, by_id
+
+
+def _is_price(value):
+    try:
+        return len(str(value)) < 100 and math.isfinite(float(value)) and float(value) >= 0
+    except (ValueError, TypeError, OverflowError):
+        return False
+
+
+def _ranked_rows(payload, mapping):
+    rows = payload["data"]
+    if not isinstance(rows, list) or not rows:
+        raise ValueError()
+    counts, dates = defaultdict(int), set()
+    for row in rows:
+        permanent = validate_model(row["variant_permaslug"])
+        count = row["count"]
+        if type(count) is not int or not 0 <= count <= 2**53:
+            raise ValueError()
+        date = row["date"]
+        datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
+        dates.add(date)
+        counts[permanent] += count
+    ordered = sorted(counts, key=lambda key: (-counts[key], key))[:15]
+    if len(ordered) != 15:
+        raise ValueError()
+    result = []
+    for rank, permanent in enumerate(ordered, 1):
+        result.append({**mapping[permanent], "rank": rank, "weekly_requests": counts[permanent]})
+    if len({r["id"] for r in result}) != 15:
+        raise ValueError()
+    return result, max(dates)
+
+
+async def _capabilities(row, semaphore):
+    async with semaphore:
         try:
-            available, cloning = await model_capability(model)
-            error = None
-        except OpenRouterError as exc:
-            available, cloning, error = False, False, str(exc)
-        return {"id": model, "name": name, "description": "Cloud voice cloning", "available": available, "supports_voice_cloning": cloning, "error": error}
-    return {"models": await asyncio.gather(*(row(m, n) for m, n in MODEL_NAMES.items())), "recommended_model": DEFAULT_MODEL}
+            available, cloning = await model_capability(row["id"])
+            return {**row, "available": available, "supports_voice_cloning": cloning}
+        except OpenRouterError:
+            return {**row, "available": False, "supports_voice_cloning": False,
+                    "error": CAPABILITY_ERROR}
+
+
+def _validate_cache(data):
+    if set(data) != {"version", "fetched_at", "data_date", "models", "catalog"} or data["version"] != 1:
+        raise ValueError()
+    stamp = datetime.fromisoformat(data["fetched_at"])
+    if stamp.tzinfo is None or stamp > _now():
+        raise ValueError()
+    datetime.strptime(data["data_date"], "%Y-%m-%d %H:%M:%S")
+    models, catalog = data["models"], data["catalog"]
+    if not isinstance(models, list) or len(models) != 15 or not isinstance(catalog, dict) or not catalog:
+        raise ValueError()
+    allowed = {"id", "name", "description", "available", "supports_voice_cloning", "rank", "weekly_requests", "pricing", "error"}
+    for row in [*models, *catalog.values()]:
+        if not isinstance(row, dict) or set(row) - allowed:
+            raise ValueError()
+        validate_model(row["id"])
+        if not all(isinstance(row[k], str) and len(row[k]) <= 100000 for k in ("name", "description")):
+            raise ValueError()
+        if not all(type(row[k]) is bool for k in ("available", "supports_voice_cloning")):
+            raise ValueError()
+        if row["supports_voice_cloning"] and not row["available"]:
+            raise ValueError()
+        if row.get("error") not in (None, CAPABILITY_ERROR):
+            raise ValueError()
+        if "pricing" in row and (not isinstance(row["pricing"], dict) or not all(
+                isinstance(k, str) and len(k) < 100 and _is_price(v) for k, v in row["pricing"].items())):
+            raise ValueError()
+    if len({r["id"] for r in models}) != 15:
+        raise ValueError()
+    for rank, row in enumerate(models, 1):
+        if type(row["rank"]) is not int or row["rank"] != rank or type(row["weekly_requests"]) is not int or row["weekly_requests"] < 0:
+            raise ValueError()
+        if row["id"] not in catalog:
+            raise ValueError()
+    if any(a["weekly_requests"] < b["weekly_requests"] for a, b in zip(models, models[1:])):
+        raise ValueError()
+    for key, row in catalog.items():
+        if key != row["id"] or row["rank"] is not None or row["weekly_requests"] is not None:
+            raise ValueError()
+    return data
+
+
+def _read_cache():
+    try:
+        path = _cache_path()
+        if path.stat().st_size > 8 * 1024 * 1024:
+            return None
+        return _validate_cache(json.loads(path.read_text()))
+    except Exception:
+        return None
+
+
+def _write_cache(data):
+    _validate_cache(data)
+    path = _cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        fd, temporary = tempfile.mkstemp(dir=path.parent)
+        with os.fdopen(fd, "w") as file:
+            json.dump(data, file, allow_nan=False)
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+async def _refresh():
+    rankings, catalog = await asyncio.gather(_public_json(RANKINGS_URL), _public_json(CATALOG_URL))
+    mapping, by_id = _metadata(catalog)
+    rows, data_date = _ranked_rows(rankings, mapping)
+    semaphore = asyncio.Semaphore(4)
+    rows = await asyncio.gather(*(_capabilities(row, semaphore) for row in rows))
+    # Cache metadata for off-list saved selections. They are checked on demand.
+    snapshot = {"version": 1, "fetched_at": _now().isoformat().replace("+00:00", "Z"),
+                "data_date": data_date, "models": rows, "catalog": by_id}
+    _write_cache(snapshot)
+    return snapshot
+
+
+async def _refresh_safe():
+    try:
+        return await _refresh(), None
+    except Exception:
+        return _read_cache(), CATALOG_ERROR
+
+
+async def list_models(refresh=False):
+    snapshot = _read_cache()
+    fresh = snapshot is not None and (_now() - datetime.fromisoformat(snapshot["fetched_at"])).total_seconds() < REFRESH_INTERVAL
+    key = (asyncio.get_running_loop(), str(_cache_path()))
+    task = _refresh_tasks.get(key)
+    error = None
+    if task is not None or refresh or not fresh:
+        if task is None:
+            task = asyncio.create_task(_refresh_safe())
+            _refresh_tasks[key] = task
+            task.add_done_callback(lambda done: _refresh_tasks.pop(key, None) if _refresh_tasks.get(key) is done else None)
+        snapshot, error = await asyncio.shield(task)
+    models = snapshot["models"] if snapshot else []
+    selected = None
+    try:
+        saved = status()["model"]
+        selected = next((row for row in models if row["id"] == saved), None)
+        if selected is None:
+            metadata = snapshot["catalog"].get(saved) if snapshot else None
+            if metadata is not None:
+                selected = await _capabilities(metadata, asyncio.Semaphore(1))
+            else:
+                selected = {"id": saved, "name": saved, "description": "", "available": False,
+                            "supports_voice_cloning": False, "rank": None, "weekly_requests": None,
+                            "error": UNKNOWN_ERROR}
+    except OpenRouterError:
+        error = "Cannot read private OpenRouter settings. Check file permissions."
+    return {"models": models, "selected_model": selected, "recommended_model": DEFAULT_MODEL,
+            "source_url": SOURCE_URL, "fetched_at": snapshot["fetched_at"] if snapshot else None,
+            "data_date": snapshot["data_date"] if snapshot else None,
+            "stale": snapshot is None or error is not None or (_now() - datetime.fromisoformat(snapshot["fetched_at"])).total_seconds() >= REFRESH_INTERVAL,
+            "refresh_interval_seconds": REFRESH_INTERVAL, **({"error": error} if error else {})}

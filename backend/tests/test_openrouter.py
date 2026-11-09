@@ -100,12 +100,8 @@ async def test_discovery_fails_closed_and_generation_requires_caps(monkeypatch):
     def handler(request):
         if 'turbo' in request.url.path:
             return httpx.Response(503)
-        return httpx.Response(200, json={"data": {"endpoints": [{"status": 0, "supports_voice_cloning": False}]}})
+        return httpx.Response(200, json={"data": {"architecture": {"output_modalities": ["speech"]}, "endpoints": [{"status": 0, "supports_voice_cloning": False}]}})
     transport(monkeypatch, handler)
-    result = await api.list_models()
-    assert len(result['models']) == 4
-    assert not any(m['supports_voice_cloning'] for m in result['models'])
-    assert result['models'][0]['error']
     backend = OpenRouterBackend()
     await backend.load_model('heygen/heygen-voice-1')
     with pytest.raises(api.OpenRouterError, match='cannot clone'):
@@ -125,7 +121,7 @@ async def test_pcm_reference_and_no_voice_override(monkeypatch, tmp_path):
     seen = []
     def handler(request):
         if request.method == 'GET':
-            return httpx.Response(200, json={"data": {"endpoints": [{"status": 0, "supports_voice_cloning": True}]}})
+            return httpx.Response(200, json={"data": {"architecture": {"output_modalities": ["speech"]}, "endpoints": [{"status": 0, "supports_voice_cloning": True}]}})
         seen.append(json.loads(request.content))
         return httpx.Response(200, content=np.array([-32768, 0, 32767], dtype='<i2').tobytes(), headers={"content-type": "audio/pcm"})
     transport(monkeypatch, handler)
@@ -226,7 +222,7 @@ async def test_pipeline_persists_model_wav_and_stable_retry(pipeline, monkeypatc
     requests = []
     def handler(request):
         if request.method == 'GET':
-            return httpx.Response(200, json={'data': {'endpoints': [{'status': 0, 'supports_voice_cloning': True}]}})
+            return httpx.Response(200, json={'data': {'architecture': {'output_modalities': ['speech']}, 'endpoints': [{'status': 0, 'supports_voice_cloning': True}]}})
         requests.append(json.loads(request.content))
         return httpx.Response(200, content=np.full(4410, 1000, dtype='<i2').tobytes(), headers={'content-type': 'audio/pcm'})
     transport(monkeypatch, handler)
@@ -261,7 +257,7 @@ async def test_pipeline_caps_failure_records_safe_error_without_post(pipeline, m
     calls = []
     def handler(request):
         calls.append(request.method)
-        return httpx.Response(200, json={'data': {'endpoints': [{'status': 0, 'supports_voice_cloning': False}]}})
+        return httpx.Response(200, json={'data': {'architecture': {'output_modalities': ['speech']}, 'endpoints': [{'status': 0, 'supports_voice_cloning': False}]}})
     transport(monkeypatch, handler)
     result = await generations.generate_speech(models.GenerationRequest(profile_id='p', text='hello', engine='openrouter'), db)
     await queue.pop(0)
@@ -347,8 +343,6 @@ def test_key_check_preserves_401_without_echo(client, monkeypatch):
 
 def test_exact_free_default_and_explicit_paid_labels():
     assert api.DEFAULT_MODEL == 'heygen/heygen-voice-1-turbo:free'
-    assert 'Free' in api.MODEL_NAMES[api.DEFAULT_MODEL]
-    assert 'Paid' in api.MODEL_NAMES['heygen/heygen-voice-1-turbo']
     assert api.status()['model'] == api.DEFAULT_MODEL
 
 
@@ -435,7 +429,7 @@ async def test_free_model_failure_never_falls_back_to_paid(monkeypatch, code):
     requests = []
     def handler(request):
         if request.method == 'GET':
-            return httpx.Response(200, json={'data': {'endpoints': [{'status': 0, 'supports_voice_cloning': True}]}})
+            return httpx.Response(200, json={'data': {'architecture': {'output_modalities': ['speech']}, 'endpoints': [{'status': 0, 'supports_voice_cloning': True}]}})
         requests.append(json.loads(request.content))
         return httpx.Response(code)
     transport(monkeypatch, handler)
@@ -498,4 +492,40 @@ async def test_aggregate_over_limit_fails_before_any_provider_request(pipeline, 
     row = db.get(Generation, result.id)
     assert row.status == 'failed'
     assert 'exceeds 180 seconds including gaps' in row.error
+    request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_safe_unseen_model_generates_mp3_without_allowlist(monkeypatch):
+    buf = io.BytesIO()
+    sf.write(buf, np.sin(np.arange(4410) * .1), 44100, format='MP3')
+    model = 'new-provider/new-speech:free'
+    monkeypatch.setattr(api, '_public_json', AsyncMock(return_value={'data': {
+        'architecture': {'output_modalities': ['speech']},
+        'endpoints': [{'status': 0, 'supports_voice_cloning': True}]}}))
+    request = AsyncMock(return_value=(buf.getvalue(), 'audio/mpeg'))
+    monkeypatch.setattr(api, 'request', request)
+    backend = OpenRouterBackend()
+    await backend.load_model(model)
+    audio, sr = await backend.generate('hi', {'input_references': [{'type': 'input_audio'}]})
+    assert len(audio) and sr == 44100
+    assert request.call_args.kwargs['payload']['model'] == model
+    assert api.status()['model'] == api.DEFAULT_MODEL
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('outputs,endpoints', [
+    (['audio'], [{'status': 0, 'supports_voice_cloning': True}]),
+    (['speech'], []),
+    (['speech'], [{'status': 1, 'supports_voice_cloning': True}]),
+])
+async def test_retired_or_non_tts_model_refused_before_paid_request(monkeypatch, outputs, endpoints):
+    monkeypatch.setattr(api, '_public_json', AsyncMock(return_value={'data': {
+        'architecture': {'output_modalities': outputs}, 'endpoints': endpoints}}))
+    request = AsyncMock()
+    monkeypatch.setattr(api, 'request', request)
+    backend = OpenRouterBackend()
+    await backend.load_model('safe/unseen-paid')
+    with pytest.raises(api.OpenRouterError, match='cannot clone'):
+        await backend.generate('hi', {'input_references': [{'type': 'input_audio'}]})
     request.assert_not_called()

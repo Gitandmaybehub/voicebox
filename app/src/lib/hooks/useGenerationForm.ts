@@ -1,16 +1,16 @@
-import { DEFAULT_OPENROUTER_MODEL, openRouterApi } from '@/lib/api/openrouter';
-import { useOpenRouter } from '@/lib/hooks/useOpenRouter';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
 import { useToast } from '@/components/ui/use-toast';
 import { apiClient } from '@/lib/api/client';
+import { DEFAULT_OPENROUTER_MODEL, findOpenRouterModel, openRouterApi } from '@/lib/api/openrouter';
 import type { EffectConfig } from '@/lib/api/types';
 import { engineSupportsInstruct } from '@/lib/constants/engines';
 import { LANGUAGE_CODES, type LanguageCode } from '@/lib/constants/languages';
 import { useGeneration } from '@/lib/hooks/useGeneration';
 import { useModelDownloadToast } from '@/lib/hooks/useModelDownloadToast';
+import { useOpenRouter } from '@/lib/hooks/useOpenRouter';
 import { useGenerationSettings } from '@/lib/hooks/useSettings';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -116,7 +116,9 @@ export function useGenerationForm(options: UseGenerationFormOptions = {}) {
           );
         }
         cloudModel = data.openrouterModel || settings.model || DEFAULT_OPENROUTER_MODEL;
-        const model = catalog.models.find((m) => m.id === cloudModel);
+        const model =
+          findOpenRouterModel(catalog, cloudModel) ??
+          findOpenRouterModel(cloud.models.data, cloudModel);
         if (!model?.available || !model.supports_voice_cloning) {
           throw new Error(
             'This OpenRouter model is unavailable or voice cloning is unverified. Choose an available clone model.',
@@ -242,12 +244,11 @@ export function useGenerationForm(options: UseGenerationFormOptions = {}) {
 
   const selectedCloudModel =
     form.watch('openrouterModel') || cloud.settings.data?.model || DEFAULT_OPENROUTER_MODEL;
-  const cloudModel = cloud.models.data?.models.find((model) => model.id === selectedCloudModel);
+  const cloudModel = findOpenRouterModel(cloud.models.data, selectedCloudModel);
   const cloudUnavailable =
     form.watch('engine') === 'openrouter' &&
     (!cloud.settings.data?.configured ||
       cloud.settings.isError ||
-      cloud.models.isError ||
       !cloudModel?.available ||
       !cloudModel.supports_voice_cloning);
 

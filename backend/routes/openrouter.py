@@ -46,5 +46,5 @@ async def test_settings():
 
 
 @router.get("/openrouter/models")
-async def get_models():
-    return await service.list_models()
+async def get_models(refresh: bool = False):
+    return await service.list_models(refresh=refresh)
