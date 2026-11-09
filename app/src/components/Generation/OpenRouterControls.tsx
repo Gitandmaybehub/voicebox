@@ -8,7 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { VoiceProfileResponse } from '@/lib/api/types';
-import { DEFAULT_OPENROUTER_MODEL } from '@/lib/api/openrouter';
+import { formatOpenRouterModelName, DEFAULT_OPENROUTER_MODEL } from '@/lib/api/openrouter';
 import type { GenerationFormValues } from '@/lib/hooks/useGenerationForm';
 import { useOpenRouter } from '@/lib/hooks/useOpenRouter';
 
@@ -54,7 +54,7 @@ export function OpenRouterControls({
               value={m.id}
               disabled={!m.available || !m.supports_voice_cloning}
             >
-              {m.name}
+              {formatOpenRouterModelName(m)}
               {m.id === models.data.recommended_model ? ' · Recommended' : ''}
               {!m.available ? ' · Unavailable' : !m.supports_voice_cloning ? ' · No cloning' : ''}
             </SelectItem>

@@ -38,6 +38,7 @@ def run_migrations(engine) -> None:
 
     _migrate_story_items(engine, inspector, tables)
     _migrate_profiles(engine, inspector, tables)
+    _migrate_profile_samples(engine, inspector, tables)
     _migrate_generations(engine, inspector, tables)
     _migrate_effect_presets(engine, inspector, tables)
     _migrate_generation_versions(engine, inspector, tables)
@@ -62,6 +63,18 @@ def _add_column(engine, table: str, column_sql: str, label: str) -> None:
 
 
 # -- per-table migrations --------------------------------------------------
+
+def _migrate_profile_samples(engine, inspector, tables: set[str]) -> None:
+    if "profile_samples" not in tables:
+        return
+    if "created_at" not in _get_columns(inspector, "profile_samples"):
+        # Old samples did not store creation time. Give them a shared sentinel;
+        # id supplies deterministic ordering without inventing historical times.
+        _add_column(engine, "profile_samples",
+                    "created_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'",
+                    "created_at")
+
+
 
 def _migrate_story_items(engine, inspector, tables: set[str]) -> None:
     if "story_items" not in tables:

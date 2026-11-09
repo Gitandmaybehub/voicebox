@@ -15,7 +15,7 @@ import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { apiClient } from '@/lib/api/client';
-import { useDeleteSample, useProfileSamples, useUpdateSample } from '@/lib/hooks/useProfiles';
+import { useDeleteSample, useProfile, useProfileSamples, useUpdateSample } from '@/lib/hooks/useProfiles';
 import { formatAudioDuration } from '@/lib/utils/audio';
 import { cn } from '@/lib/utils/cn';
 import { SampleUpload } from './SampleUpload';
@@ -150,6 +150,7 @@ interface SampleListProps {
 }
 
 export function SampleList({ profileId }: SampleListProps) {
+  const { data: profile } = useProfile(profileId);
   const { t } = useTranslation();
   const { data: samples, isLoading } = useProfileSamples(profileId);
   const deleteSample = useDeleteSample();
@@ -325,7 +326,7 @@ export function SampleList({ profileId }: SampleListProps) {
         {t('sampleList.addSample')}
       </Button>
 
-      <p className="text-xs text-muted-foreground text-center px-2">{t('sampleList.note')}</p>
+      <p className="text-xs text-muted-foreground text-center px-2">{profile?.default_engine === 'openrouter' ? 'All samples are combined, up to 3 minutes total' : t('sampleList.note')}</p>
 
       <SampleUpload profileId={profileId} open={uploadOpen} onOpenChange={setUploadOpen} />
 

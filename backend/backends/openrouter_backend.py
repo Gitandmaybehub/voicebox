@@ -22,27 +22,64 @@ class OpenRouterBackend:
     async def load_model(self, model_size=None):
         self._model.set(api.resolve_model(model_size))
 
-    async def create_voice_prompt(self, audio_path, reference_text, use_cache=True):
+    REFERENCE_RATE = 24000
+    MAX_REFERENCE_SECONDS = 180
+    GAP_SECONDS = 0.2
+
+    def _read_reference(self, audio_path):
+        """Decode the complete reference and resample without changing pitch/speed."""
+        from math import gcd
+        from scipy.signal import resample_poly
+
         try:
-            # Bounded decode, mono PCM16 WAV, at most 3 minutes and 15 MiB.
             with sf.SoundFile(audio_path) as source:
                 sr = source.samplerate
-                total_frames = source.frames
                 if not 8000 <= sr <= 192000 or not 1 <= source.channels <= 8:
                     raise ValueError()
-                frames = min(int(sr * 180), (15 * 1024 * 1024 - 4096) // 2)
-                audio = source.read(frames, dtype="float32", always_2d=True).mean(axis=1)
+                if source.frames > sr * self.MAX_REFERENCE_SECONDS:
+                    raise api.OpenRouterError("Combined reference exceeds 180 seconds including gaps. Shorten or remove samples; no audio was clipped.")
+                audio = source.read(dtype="float32", always_2d=True).mean(axis=1)
             if not len(audio) or not np.isfinite(audio).all() or np.max(np.abs(audio)) < 1e-6:
                 raise ValueError()
-            buf = io.BytesIO()
-            sf.write(buf, audio, sr, format="WAV", subtype="PCM_16")
-            references = [{"type": "input_audio", "input_audio": {"data": "data:audio/wav;base64," + base64.b64encode(buf.getvalue()).decode("ascii")}}]
-            # A cropped clip must not carry the full original transcript.
-            if reference_text and len(reference_text) <= 10000 and total_frames <= frames:
-                references.append({"type": "text", "text": reference_text})
-            return {"input_references": references}, False
+            if sr != self.REFERENCE_RATE:
+                divisor = gcd(sr, self.REFERENCE_RATE)
+                audio = resample_poly(audio, self.REFERENCE_RATE // divisor, sr // divisor)
+            return audio
+        except api.OpenRouterError:
+            raise
         except Exception:
             raise api.OpenRouterError("Cannot read the profile recording. Add a clear WAV recording and try again.") from None
+
+    async def combine_voice_prompts(self, audio_paths, reference_texts):
+        import asyncio
+
+        if not audio_paths or len(audio_paths) != len(reference_texts):
+            raise api.OpenRouterError("Each profile recording must have its own transcript field.")
+        parts = []
+        frames = 0
+        gap = np.zeros(round(self.GAP_SECONDS * self.REFERENCE_RATE), dtype=np.float32)
+        for path in audio_paths:
+            audio = await asyncio.to_thread(self._read_reference, path)
+            frames += len(audio) + (len(gap) if parts else 0)
+            if frames > self.MAX_REFERENCE_SECONDS * self.REFERENCE_RATE:
+                raise api.OpenRouterError("Combined reference exceeds 180 seconds including gaps. Shorten or remove samples; no audio was clipped.")
+            if parts:
+                parts.append(gap)
+            parts.append(audio)
+        # Partial transcripts do not describe the complete recording.
+        text = " ".join(t.strip() for t in reference_texts) if all(t and t.strip() for t in reference_texts) else ""
+        return np.concatenate(parts), text
+
+    async def create_voice_prompt(self, audio_path, reference_text, use_cache=True):
+        import asyncio
+
+        audio = await asyncio.to_thread(self._read_reference, audio_path)
+        buf = io.BytesIO()
+        sf.write(buf, audio, self.REFERENCE_RATE, format="WAV", subtype="PCM_16")
+        references = [{"type": "input_audio", "input_audio": {"data": "data:audio/wav;base64," + base64.b64encode(buf.getvalue()).decode("ascii")}}]
+        if reference_text and reference_text.strip() and len(reference_text) <= 10000:
+            references.append({"type": "text", "text": reference_text})
+        return {"input_references": references}, False
 
     async def generate(self, text, voice_prompt, language="en", seed=None, instruct=None):
         model = self._model.get()

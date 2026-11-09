@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { FormControl, FormItem, FormMessage } from '@/components/ui/form';
 
 interface AudioSampleUploadProps {
+  maxDuration: number;
   file: File | null | undefined;
   onFileChange: (file: File | undefined) => void;
   onTranscribe?: () => void;
@@ -17,6 +18,7 @@ interface AudioSampleUploadProps {
 }
 
 export function AudioSampleUpload({
+  maxDuration,
   file,
   onFileChange,
   onTranscribe,
@@ -95,7 +97,7 @@ export function AudioSampleUpload({
                   {t('audioSample.chooseFile')}
                 </Button>
                 <p className="text-sm text-muted-foreground text-center">
-                  {t('audioSample.uploadHint')}
+                  {t('audioSample.uploadHint', { max: maxDuration })}
                 </p>
               </>
             ) : (

@@ -60,7 +60,6 @@ import { AudioSampleSystem } from './AudioSampleSystem';
 import { AudioSampleUpload } from './AudioSampleUpload';
 import { SampleList } from './SampleList';
 
-const MAX_AUDIO_DURATION_SECONDS = 30;
 const MAX_DESIGN_PROMPT_LENGTH = 500;
 /** Engines that can't be a default for a sample-based (cloned) profile. */
 const PRESET_ONLY_ENGINES = new Set(['kokoro', 'qwen_custom_voice', 'qwen_voice_design']);
@@ -171,6 +170,7 @@ export function ProfileForm() {
   const selectedEngine = useUIStore((state) => state.selectedEngine);
   const [defaultEngine, setDefaultEngine] = useState<string>(selectedEngine === 'openrouter' ? 'openrouter' : '');
   const transcriptOptional = defaultEngine === 'openrouter';
+  const maxDuration = transcriptOptional ? 180 : 30;
 
   // A new profile must not inherit the last edited profile's local engine.
   useEffect(() => {
@@ -202,12 +202,12 @@ export function ProfileForm() {
       getAudioDuration(selectedFile as File & { recordedDuration?: number })
         .then((duration) => {
           setAudioDuration(duration);
-          if (duration > MAX_AUDIO_DURATION_SECONDS) {
+          if (duration > maxDuration) {
             form.setError('sampleFile', {
               type: 'manual',
               message: t('profileForm.validation.audioTooLong', {
                 duration: formatAudioDuration(duration),
-                max: formatAudioDuration(MAX_AUDIO_DURATION_SECONDS),
+                max: formatAudioDuration(maxDuration),
               }),
             });
           } else {
@@ -237,7 +237,7 @@ export function ProfileForm() {
       setAudioDuration(null);
       form.clearErrors('sampleFile');
     }
-  }, [selectedFile, form, t]);
+  }, [selectedFile, maxDuration, form, t]);
 
   const {
     isRecording,
@@ -247,7 +247,7 @@ export function ProfileForm() {
     stopRecording,
     cancelRecording,
   } = useAudioRecording({
-    maxDurationSeconds: 29,
+    maxDurationSeconds: maxDuration,
     onRecordingComplete: (blob, recordedDuration) => {
       const file = new File([blob], `recording-${Date.now()}.webm`, {
         type: blob.type || 'audio/webm',
@@ -273,7 +273,7 @@ export function ProfileForm() {
     stopRecording: stopSystemRecording,
     cancelRecording: cancelSystemRecording,
   } = useSystemAudioCapture({
-    maxDurationSeconds: 29,
+    maxDurationSeconds: maxDuration,
     onRecordingComplete: (blob, recordedDuration) => {
       const file = new File([blob], `system-audio-${Date.now()}.wav`, {
         type: blob.type || 'audio/wav',
@@ -691,19 +691,19 @@ export function ProfileForm() {
 
         try {
           const duration = await getAudioDuration(sampleFile);
-          if (duration > MAX_AUDIO_DURATION_SECONDS) {
+          if (duration > maxDuration) {
             form.setError('sampleFile', {
               type: 'manual',
               message: t('profileForm.validation.audioTooLong', {
                 duration: formatAudioDuration(duration),
-                max: formatAudioDuration(MAX_AUDIO_DURATION_SECONDS),
+                max: formatAudioDuration(maxDuration),
               }),
             });
             toast({
               title: t('profileForm.toast.invalidAudio'),
               description: t('profileForm.toast.invalidAudioDescription', {
                 duration: formatAudioDuration(duration),
-                max: formatAudioDuration(MAX_AUDIO_DURATION_SECONDS),
+                max: formatAudioDuration(maxDuration),
               }),
               variant: 'destructive',
             });
@@ -1052,6 +1052,7 @@ export function ProfileForm() {
                         </div>
                       ) : (
                         <>
+                          {transcriptOptional && <p className="text-xs text-muted-foreground">All samples are combined, up to 3 minutes total</p>}
                           <Tabs
                             className="pt-0"
                             value={sampleMode}
@@ -1092,6 +1093,7 @@ export function ProfileForm() {
                                 name="sampleFile"
                                 render={({ field: { onChange, name } }) => (
                                   <AudioSampleUpload
+                                    maxDuration={maxDuration}
                                     file={selectedFile}
                                     onFileChange={onChange}
                                     onTranscribe={transcriptOptional ? undefined : handleTranscribe}
@@ -1101,7 +1103,7 @@ export function ProfileForm() {
                                     isTranscribing={transcribe.isPending}
                                     isDisabled={
                                       audioDuration !== null &&
-                                      audioDuration > MAX_AUDIO_DURATION_SECONDS
+                                      audioDuration > maxDuration
                                     }
                                     fieldName={name}
                                   />
@@ -1115,6 +1117,7 @@ export function ProfileForm() {
                                 name="sampleFile"
                                 render={() => (
                                   <AudioSampleRecording
+                                    maxDuration={maxDuration}
                                     file={selectedFile}
                                     isRecording={isRecording}
                                     duration={duration}
@@ -1137,6 +1140,7 @@ export function ProfileForm() {
                                   name="sampleFile"
                                   render={() => (
                                     <AudioSampleSystem
+                                      maxDuration={maxDuration}
                                       file={selectedFile}
                                       isRecording={isSystemRecording}
                                       duration={systemDuration}
@@ -1160,7 +1164,6 @@ export function ProfileForm() {
                             render={({ field }) => (
                               <FormItem>
                                 <FormLabel>{transcriptOptional ? 'Reference text (optional for OpenRouter)' : t('profileForm.fields.referenceText')}</FormLabel>
-                                {transcriptOptional && <p className="text-xs text-muted-foreground">Exact spoken words, or leave blank.</p>}
                                 <FormControl>
                                   <Textarea
                                     placeholder={t('profileForm.fields.referenceTextPlaceholder')}

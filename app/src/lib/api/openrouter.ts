@@ -1,6 +1,6 @@
 import { useServerStore } from '@/stores/serverStore';
 
-export const DEFAULT_OPENROUTER_MODEL = 'heygen/heygen-voice-1';
+export const DEFAULT_OPENROUTER_MODEL = 'heygen/heygen-voice-1-turbo:free';
 export interface OpenRouterSettings {
   configured: boolean;
   model: string;
@@ -15,6 +15,11 @@ export interface OpenRouterModel {
 export interface OpenRouterModels {
   models: OpenRouterModel[];
   recommended_model: string;
+}
+
+export function formatOpenRouterModelName(model: Pick<OpenRouterModel, 'id' | 'name'>): string {
+  const name = model.name.replace(/\s*\((Free|Paid)\)$/i, '');
+  return `${name} (${model.id.endsWith(':free') ? 'Free' : 'Paid'})`;
 }
 
 // Never echo provider response bodies: validation errors can include submitted secrets.

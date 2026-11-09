@@ -27,6 +27,7 @@ import { useAudioRecording } from '@/lib/hooks/useAudioRecording';
 import { useAddSample, useProfile } from '@/lib/hooks/useProfiles';
 import { useSystemAudioCapture } from '@/lib/hooks/useSystemAudioCapture';
 import { useTranscription } from '@/lib/hooks/useTranscription';
+import { getAudioDuration, formatAudioDuration } from '@/lib/utils/audio';
 import { usePlatform } from '@/platform/PlatformContext';
 import { AudioSampleRecording } from './AudioSampleRecording';
 import { AudioSampleSystem } from './AudioSampleSystem';
@@ -53,6 +54,7 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
   const transcribe = useTranscription();
   const { data: profile } = useProfile(profileId);
   const transcriptOptional = profile?.default_engine === 'openrouter';
+  const maxDuration = transcriptOptional ? 180 : 30;
   const { toast } = useToast();
   const [mode, setMode] = useState<'upload' | 'record' | 'system'>('upload');
   const { isPlaying, playPause, cleanup: cleanupAudio } = useAudioPlayer();
@@ -74,7 +76,7 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
     stopRecording,
     cancelRecording,
   } = useAudioRecording({
-    maxDurationSeconds: 29,
+    maxDurationSeconds: maxDuration,
     onRecordingComplete: (blob, recordedDuration) => {
       // Convert blob to File object
       const file = new File([blob], `recording-${Date.now()}.webm`, {
@@ -101,7 +103,7 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
     stopRecording: stopSystemRecording,
     cancelRecording: cancelSystemRecording,
   } = useSystemAudioCapture({
-    maxDurationSeconds: 29,
+    maxDurationSeconds: maxDuration,
     onRecordingComplete: (blob, recordedDuration) => {
       // Convert blob to File object
       const file = new File([blob], `system-audio-${Date.now()}.wav`, {
@@ -173,6 +175,13 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
       return;
     }
     try {
+      const duration = await getAudioDuration(data.file);
+      if (duration > maxDuration) {
+        form.setError('file', {
+          message: `Audio is ${formatAudioDuration(duration)}. Maximum duration: ${formatAudioDuration(maxDuration)}.`,
+        });
+        return;
+      }
       await addSample.mutateAsync({
         profileId,
         file: data.file,
@@ -230,7 +239,9 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
         <DialogHeader>
           <DialogTitle>Add Audio Sample</DialogTitle>
           <DialogDescription>
-            Upload an audio file and provide the reference text that matches the audio.
+            {transcriptOptional
+              ? 'All samples are combined, up to 3 minutes total'
+              : 'Upload an audio file and provide the reference text that matches the audio.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -262,6 +273,7 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
                   name="file"
                   render={({ field: { onChange, name } }) => (
                     <AudioSampleUpload
+                      maxDuration={maxDuration}
                       file={selectedFile}
                       onFileChange={onChange}
                       onTranscribe={transcriptOptional ? undefined : handleTranscribe}
@@ -280,6 +292,7 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
                   name="file"
                   render={() => (
                     <AudioSampleRecording
+                      maxDuration={maxDuration}
                       file={selectedFile}
                       isRecording={isRecording}
                       duration={duration}
@@ -302,6 +315,7 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
                     name="file"
                     render={() => (
                       <AudioSampleSystem
+                        maxDuration={maxDuration}
                         file={selectedFile}
                         isRecording={isSystemRecording}
                         duration={systemDuration}
@@ -325,7 +339,6 @@ export function SampleUpload({ profileId, open, onOpenChange }: SampleUploadProp
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>{transcriptOptional ? 'Reference text (optional for OpenRouter)' : 'Reference Text'}</FormLabel>
-                  {transcriptOptional && <p className="text-xs text-muted-foreground">Exact spoken words, or leave blank.</p>}
                   <FormControl>
                     <Textarea
                       placeholder="Enter the exact text spoken in the audio..."

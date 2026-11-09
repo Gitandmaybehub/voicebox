@@ -259,7 +259,9 @@ async def add_profile_sample(
 
     # Validate and load audio in a single pass, off the event loop
     is_valid, error_msg, audio, sr = await asyncio.to_thread(
-        validate_and_load_reference_audio, audio_path
+        validate_and_load_reference_audio, audio_path,
+        max_duration=180.0 if default_engine_for_profile(profile) == "openrouter" else 30.0,
+        preprocess=default_engine_for_profile(profile) != "openrouter",
     )
     if not is_valid:
         raise ValueError(f"Invalid reference audio: {error_msg}")
@@ -644,8 +646,8 @@ async def create_voice_prompt_for_profile(
     tts_model = get_tts_backend_for_engine(engine)
 
     if engine == "openrouter":
-        # One deterministic reference, independent of database row order.
-        samples = sorted(samples, key=lambda sample: sample.id)[:1]
+        # Keep every recording in chronological order, with a stable tie-breaker.
+        samples = sorted(samples, key=lambda sample: (sample.created_at, sample.id))
 
     if len(samples) == 1:
         sample = samples[0]
@@ -676,7 +678,9 @@ async def create_voice_prompt_for_profile(
     # Create a hash of sample IDs to identify this specific combination
     import hashlib
 
-    sample_ids_str = "-".join(sorted([s.id for s in samples]))
+    sample_ids_str = "-".join([s.id for s in samples] if engine == "openrouter" else sorted(s.id for s in samples))
+    if engine == "openrouter":
+        sample_ids_str = "openrouter-24k-v1-" + sample_ids_str
     combination_hash = hashlib.md5(sample_ids_str.encode()).hexdigest()[:12]
 
     cache_dir = _get_cache_dir()

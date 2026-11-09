@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { DEFAULT_OPENROUTER_MODEL, openRouterApi } from '@/lib/api/openrouter';
+import { formatOpenRouterModelName, DEFAULT_OPENROUTER_MODEL, openRouterApi } from '@/lib/api/openrouter';
 import { useOpenRouter } from '@/lib/hooks/useOpenRouter';
 import { SettingRow, SettingSection } from './SettingRow';
 
@@ -100,7 +100,7 @@ export function OpenRouterPage() {
                   value={m.id}
                   disabled={!m.available || !m.supports_voice_cloning}
                 >
-                  {m.name}
+                  {formatOpenRouterModelName(m)}
                   {m.id === models.data.recommended_model ? ' · Recommended' : ''}
                   {!m.available
                     ? ' · Unavailable'

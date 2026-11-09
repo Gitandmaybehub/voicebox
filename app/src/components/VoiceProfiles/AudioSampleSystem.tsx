@@ -5,6 +5,7 @@ import { FormControl, FormItem, FormMessage } from '@/components/ui/form';
 import { formatAudioDuration } from '@/lib/utils/audio';
 
 interface AudioSampleSystemProps {
+  maxDuration: number;
   file: File | null | undefined;
   isRecording: boolean;
   duration: number;
@@ -18,6 +19,7 @@ interface AudioSampleSystemProps {
 }
 
 export function AudioSampleSystem({
+  maxDuration,
   file,
   isRecording,
   duration,
@@ -41,7 +43,7 @@ export function AudioSampleSystem({
                 {t('audioSample.startCapture')}
               </Button>
               <p className="text-sm text-muted-foreground text-center">
-                {t('audioSample.systemHint')}
+                {t('audioSample.systemHint', { max: maxDuration })}
               </p>
             </div>
           )}
@@ -66,7 +68,7 @@ export function AudioSampleSystem({
                 {t('audioSample.stopCapture')}
               </Button>
               <p className="text-sm text-muted-foreground text-center">
-                {t('audioSample.remaining', { time: formatAudioDuration(30 - duration) })}
+                {t('audioSample.remaining', { time: formatAudioDuration(Math.max(0, maxDuration - 1 - duration)) })}
               </p>
             </div>
           )}

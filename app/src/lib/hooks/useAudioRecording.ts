@@ -140,9 +140,9 @@ export function useAudioRecording({
 
           // Auto-stop at max duration when the caller opts in — dictation
           // sessions pass undefined and run until the user releases the
-          // chord or hits stop; voice-clone sample recorders pass 29s to
-          // keep reference clips short.
-          if (maxDurationSeconds !== undefined && elapsed >= maxDurationSeconds) {
+          // chord or hits stop. Sample recorders reserve one second for
+          // recorder shutdown so the resulting file stays within the limit.
+          if (maxDurationSeconds !== undefined && elapsed >= maxDurationSeconds - 1) {
             if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
               mediaRecorderRef.current.stop();
               setIsRecording(false);

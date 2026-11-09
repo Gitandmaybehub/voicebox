@@ -326,6 +326,7 @@ def validate_and_load_reference_audio(
     min_duration: float = 2.0,
     max_duration: float = 30.0,
     min_rms: float = 0.01,
+    preprocess: bool = True,
 ) -> Tuple[bool, Optional[str], Optional[np.ndarray], Optional[int]]:
     """
     Validate and load reference audio in a single pass.
@@ -339,7 +340,8 @@ def validate_and_load_reference_audio(
     """
     try:
         audio, sr = load_audio(audio_path)
-        audio = preprocess_reference_audio(audio, sr)
+        if preprocess:
+            audio = preprocess_reference_audio(audio, sr)
         duration = len(audio) / sr
 
         if duration < min_duration:

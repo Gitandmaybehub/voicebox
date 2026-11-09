@@ -70,9 +70,10 @@ const ENGINE_DISPLAY_NAMES: Record<string, string> = {
 export function formatEngineName(engine?: string, modelSize?: string): string {
   if (engine === 'openrouter') {
     const names: Record<string, string> = {
-      'heygen/heygen-voice-1': 'HeyGen Voice',
-      'heygen/heygen-voice-1-turbo': 'HeyGen Voice Turbo',
-      'fish-audio/drama-3': 'Fish Audio Drama 3',
+      'heygen/heygen-voice-1': 'HeyGen Voice (Paid)',
+      'heygen/heygen-voice-1-turbo': 'HeyGen Voice Turbo (Paid)',
+      'heygen/heygen-voice-1-turbo:free': 'HeyGen Voice Turbo (Free)',
+      'fish-audio/drama-3': 'Fish Audio Drama 3 (Paid)',
     };
     return `OpenRouter · ${names[modelSize ?? ''] ?? modelSize ?? 'Cloud voice'}`;
   }

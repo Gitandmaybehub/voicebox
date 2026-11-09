@@ -23,6 +23,7 @@ const MemoizedWaveform = memo(function MemoizedWaveform({
 });
 
 interface AudioSampleRecordingProps {
+  maxDuration: number;
   file: File | null | undefined;
   isRecording: boolean;
   duration: number;
@@ -37,6 +38,7 @@ interface AudioSampleRecordingProps {
 }
 
 export function AudioSampleRecording({
+  maxDuration,
   file,
   isRecording,
   duration,
@@ -95,7 +97,7 @@ export function AudioSampleRecording({
                 {t('audioSample.startRecording')}
               </Button>
               <p className="relative z-10 text-sm text-muted-foreground text-center">
-                {t('audioSample.recordHint')}
+                {t('audioSample.recordHint', { max: maxDuration })}
               </p>
             </div>
           )}
@@ -120,7 +122,7 @@ export function AudioSampleRecording({
                 {t('audioSample.stopRecording')}
               </Button>
               <p className="relative z-10 text-sm text-muted-foreground text-center">
-                {t('audioSample.remaining', { time: formatAudioDuration(30 - duration) })}
+                {t('audioSample.remaining', { time: formatAudioDuration(Math.max(0, maxDuration - 1 - duration)) })}
               </p>
             </div>
           )}

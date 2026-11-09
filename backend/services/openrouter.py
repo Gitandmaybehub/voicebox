@@ -10,11 +10,12 @@ import threading
 import httpx
 
 BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "heygen/heygen-voice-1"
+DEFAULT_MODEL = "heygen/heygen-voice-1-turbo:free"
 MODEL_NAMES = {
-    DEFAULT_MODEL: "HeyGen Voice",
-    "heygen/heygen-voice-1-turbo": "HeyGen Voice Turbo",
-    "fish-audio/drama-3": "Fish Audio Drama 3",
+    DEFAULT_MODEL: "HeyGen Voice Turbo (Free)",
+    "heygen/heygen-voice-1": "HeyGen Voice (Paid)",
+    "heygen/heygen-voice-1-turbo": "HeyGen Voice Turbo (Paid)",
+    "fish-audio/drama-3": "Fish Audio Drama 3 (Paid)",
 }
 _lock = threading.Lock()
 

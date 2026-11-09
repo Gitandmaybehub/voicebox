@@ -57,6 +57,7 @@ class ProfileSample(Base):
     profile_id = Column(String, ForeignKey("profiles.id"), nullable=False, index=True)
     audio_path = Column(String, nullable=False)
     reference_text = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
 
 class Generation(Base):
