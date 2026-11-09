@@ -49,3 +49,5 @@ bun run build:web
 Provider response tests use simulated audio and fake credentials. They check decoding, saved audio, retry behavior and error handling. They do not measure real voice similarity. No real voice generation has been verified without an actual key and a confirmed voice recording.
 
 Verified in this fork: 106 focused backend tests passed, TypeScript checks passed, and the production web build passed. Browser checks covered saving and removing a test key, a real rejected-key response from OpenRouter, model persistence after reloading, creating a sample without a transcript or local download, and selecting a replacement after deleting a profile. Temporary test profiles and the test key were removed. [Watch the setup preview](docs/openrouter-walkthrough.mp4).
+
+The Apple Silicon Mac app was also built, installed and opened. Its bundled server accepted a sample with no transcript, reported the correct sample count, and confirmed all three models' current cloning support. The native settings and recording screens were checked. The first packaged sample took about 36 seconds to prepare. No real voice generation was run.
